@@ -1,0 +1,105 @@
+import pandas as pd
+import numpy as np
+from scipy.stats import f
+
+train_data_m = pd.read_excel("C:\\Users\\leand\\Downloads\\livros2.xlsx")
+target_column = 'Avaliação'
+
+# Calcular entropia
+def calc_entropy(data):
+    probabilities = data.value_counts(normalize=True)
+    return -np.sum(probabilities * np.log2(probabilities + np.finfo(float).eps))  # eps para evitar log(0)
+
+
+# Calcular ganho de informação
+def calc_info_gain(data, feature, target):
+    total_entropy = calc_entropy(data[target])
+    weights = data[feature].value_counts(normalize=True)
+    feature_entropy = sum(weights[f] * calc_entropy(data[data[feature] == f][target]) for f in data[feature].unique())
+    return total_entropy - feature_entropy
+
+def build_tree(data, target, features):
+    if len(data[target].unique()) == 1:
+        return data[target].iloc[0]
+
+    if not features:
+        return data[target].mode()[0]
+
+    best_feature = max(features, key=lambda f: calc_info_gain(data, f, target))
+    tree = {best_feature: {}}
+    features = [f for f in features if f != best_feature]
+
+    for value in data[best_feature].unique():
+        subset = data[data[best_feature] == value]
+        tree[best_feature][value] = build_tree(subset, target, features)
+
+    return tree
+
+#divide em teste e treino
+def train_test_split(data, test_size=0):
+    test_data = data.sample(frac=test_size)
+    train_data = data.drop(test_data.index)
+    return train_data, test_data
+
+def predict(tree, instance):
+    if not isinstance(tree, dict):
+        return tree
+    feature = next(iter(tree))
+    if instance[feature] in tree[feature]:
+        return predict(tree[feature][instance[feature]], instance)
+    return None
+
+def evaluate(tree, test_data):
+    correct = sum(predict(tree, row) == row[-1] for _, row in test_data.iterrows())
+    return correct / len(test_data)
+
+# Função para calcular resíduos, SQ, MQ, F e F de significação
+def residual_analysis(tree, data, target):
+    data['Prediction'] = data.apply(lambda row: predict(tree, row), axis=1)
+    data['Residual'] = data[target] - data['Prediction']
+
+    SS_Residual = sum(data['Residual'] ** 2)
+    SS_Total = sum((data[target] - np.mean(data[target])) ** 2)
+    SS_Regression = SS_Total - SS_Residual
+
+    DF_Regression = 1
+    DF_Residual = len(data) - DF_Regression - 1
+
+    MS_Regression = SS_Regression / DF_Regression
+    MS_Residual = SS_Residual / DF_Residual
+
+    F_value = MS_Regression / MS_Residual
+    p_value = 1 - f.cdf(F_value, DF_Regression, DF_Residual)
+
+    return {
+        'SS_Regression': SS_Regression,
+        'SS_Residual': SS_Residual,
+        'SS_Total': SS_Total,
+        'DF_Regression': DF_Regression,
+        'DF_Residual': DF_Residual,
+        'MS_Regression': MS_Regression,
+        'MS_Residual': MS_Residual,
+        'F_value': F_value,
+        'p_value': p_value
+    }
+
+def main():
+    target = target_column
+    features = train_data_m.columns.tolist()
+    features.remove(target)
+
+    train_data, test_data = train_test_split(train_data_m)
+    tree = build_tree(train_data, target, features)
+    acuracce_train = evaluate(tree, train_data)
+    # acuracce_teste = evaluate(tree, test_data)
+    print(tree)
+    print(acuracce_train)
+    # print(acuracce_teste)
+
+    #residuals = residual_analysis(tree, train_data, target)
+    #print("Residual Analysis:", residuals)
+
+    return tree
+
+if __name__ == "__main__":
+    tree = main()
